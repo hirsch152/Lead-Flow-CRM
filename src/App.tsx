@@ -60,8 +60,11 @@ interface Lead {
   firstName: string;
   lastName: string;
   title?: string;
+  company?: string;
   email: string;
+  officePhone?: string;
   city?: string;
+  state?: string;
   streetAddress?: string;
   notes?: string;
   stage: LeadStage;
@@ -110,19 +113,65 @@ const useAuth = () => useContext(AuthContext);
 
 // --- Components ---
 
+const InlineEditor: React.FC<{
+  value: string;
+  onSave: (val: string) => void;
+  onCancel: () => void;
+  type?: 'text' | 'select';
+  options?: string[];
+}> = ({ value, onSave, onCancel, type = 'text', options = [] }) => {
+  const [val, setVal] = useState(value);
+  const inputRef = React.useRef<HTMLInputElement | HTMLSelectElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') onSave(val);
+    if (e.key === 'Escape') onCancel();
+  };
+
+  if (type === 'select') {
+    return (
+      <select
+        ref={inputRef as React.RefObject<HTMLSelectElement>}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => onSave(val)}
+        onKeyDown={handleKeyDown}
+        className="w-full bg-white border-none focus:ring-2 focus:ring-primary/20 rounded px-1 py-0.5 text-sm font-medium outline-none"
+      >
+        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef as React.RefObject<HTMLInputElement>}
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => onSave(val)}
+      onKeyDown={handleKeyDown}
+      className="w-full bg-white border-none focus:ring-2 focus:ring-primary/20 rounded px-1 py-0.5 text-sm font-medium outline-none"
+    />
+  );
+};
+
 const StageBadge: React.FC<{ stage: LeadStage }> = ({ stage }) => {
   const colors: Record<LeadStage, string> = {
-    'New Lead': 'bg-gray-100 text-gray-700 border-gray-200',
-    'First Contact': 'bg-[#E5F1FF] text-[#2da9e0] border-[#E5F1FF]',
-    'Second Outreach': 'bg-[#FFF4E5] text-[#FF9500] border-[#FFF4E5]',
-    'Third Outreach': 'bg-[#FFEBEA] text-[#FF3B30] border-[#FFEBEA]',
-    'Follow Up': 'bg-[#EBF9EE] text-[#34C759] border-[#EBF9EE]',
-    'Closed': 'bg-[#EFEFF9] text-[#5856D6] border-[#EFEFF9]',
+    'New Lead': 'bg-slate-100 text-slate-600',
+    'First Contact': 'bg-sky-100 text-sky-600',
+    'Second Outreach': 'bg-orange-100 text-orange-600',
+    'Third Outreach': 'bg-red-100 text-red-600',
+    'Follow Up': 'bg-emerald-100 text-emerald-600',
+    'Closed': 'bg-indigo-100 text-indigo-600',
   };
 
   return (
     <span className={cn(
-      "px-2.5 py-0.5 rounded-full text-xs font-medium border",
+      "px-2 py-1 rounded-full text-[11px] font-medium w-fit transition-colors",
       colors[stage]
     )}>
       {stage}
@@ -187,6 +236,87 @@ function CRMContent() {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Lead; direction: 'asc' | 'desc' } | null>({ key: 'createdAt', direction: 'desc' });
+  const [editingCell, setEditingCell] = useState<{ id: string; field: keyof Lead | 'fullName' } | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
+
+  const handleInlineSave = async (lead: Lead, field: keyof Lead | 'fullName', value: string) => {
+    if (editingCell?.id !== lead.id) return;
+    
+    try {
+      if (field === 'fullName') {
+        const parts = value.trim().split(/\s+/);
+        const firstName = parts[0] || '';
+        const lastName = parts.slice(1).join(' ') || '';
+        if (!firstName) {
+          setEditingCell(null);
+          return;
+        }
+        await updateDoc(doc(db, 'leads', lead.id), { firstName, lastName });
+      } else {
+        if (field === 'email' && value && !value.includes('@')) {
+          setEditingCell(null);
+          return;
+        }
+        await updateDoc(doc(db, 'leads', lead.id), { [field]: value });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `leads/${lead.id}`);
+    }
+    setEditingCell(null);
+  };
+
+  const renderGridCell = (field: keyof Lead | 'fullName', label: string, content: React.ReactNode, value: string, lead: Lead) => {
+    const isEditing = editingCell?.id === lead.id && editingCell?.field === field;
+    
+    return (
+      <div 
+        className={cn(
+          "flex flex-col gap-1 transition-all duration-200 relative",
+          isEditing ? "bg-primary/5 ring-1 ring-inset ring-primary/20 z-20 p-1 rounded" : ""
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isEditing) {
+            setEditingCell({ id: lead.id, field });
+          }
+        }}
+      >
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+        {isEditing ? (
+          <InlineEditor 
+            value={value} 
+            onSave={(val) => handleInlineSave(lead, field, val)} 
+            onCancel={() => setEditingCell(null)}
+            type={field === 'stage' ? 'select' : 'text'}
+            options={field === 'stage' ? ['New Lead', 'First Contact', 'Second Outreach', 'Third Outreach', 'Follow Up', 'Closed'] : []}
+          />
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <div className="truncate">{content}</div>
+            <div className="opacity-0 group-hover:opacity-40 transition-opacity shrink-0">
+              <Edit2 size={10} className="text-gray-400" />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const handleSort = (key: keyof Lead) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const SortIndicator: React.FC<{ columnKey: keyof Lead }> = ({ columnKey }) => {
+    if (sortConfig?.key !== columnKey) return <ChevronRight size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />;
+    return sortConfig.direction === 'asc' 
+      ? <ChevronRight size={12} className="-rotate-90 text-primary" /> 
+      : <ChevronRight size={12} className="rotate-90 text-primary" />;
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -229,11 +359,43 @@ function CRMContent() {
 
   const handleLogout = () => signOut(auth);
 
-  const filteredLeads = leads.filter(lead => 
-    `${lead.firstName} ${lead.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    lead.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    lead.title?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredLeads = leads
+    .filter(lead => 
+      `${lead.firstName} ${lead.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      lead.company?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const { key, direction } = sortConfig;
+      
+      let aValue: any = a[key] || '';
+      let bValue: any = b[key] || '';
+
+      if (key === 'firstName') {
+        aValue = `${a.firstName} ${a.lastName}`.toLowerCase();
+        bValue = `${b.firstName} ${b.lastName}`.toLowerCase();
+      } else if (key === 'stage') {
+        const stageOrder: Record<LeadStage, number> = {
+          'New Lead': 1,
+          'First Contact': 2,
+          'Second Outreach': 3,
+          'Third Outreach': 4,
+          'Follow Up': 5,
+          'Closed': 6
+        };
+        aValue = stageOrder[a.stage];
+        bValue = stageOrder[b.stage];
+      } else if (typeof aValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+      
+      if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
 
   if (loading) {
     return (
@@ -340,9 +502,8 @@ function CRMContent() {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 md:ml-64 min-h-screen">
-        <header className="sticky top-0 z-40 flex items-center justify-between h-20 px-8 bg-white/80 backdrop-blur-md border-b border-gray-100">
+      <main className="flex-1 md:ml-64 min-h-screen pt-24">
+        <header className="fixed top-0 right-0 left-0 md:left-64 z-40 flex items-center justify-between h-20 px-8 bg-white border-b border-gray-100 shadow-sm">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(true)}
@@ -378,83 +539,146 @@ function CRMContent() {
 
         <div className="p-8">
           {activeTab === 'leads' && (
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              <AnimatePresence mode="popLayout">
-                {filteredLeads.map((lead) => (
-                  <motion.div
-                    key={lead.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="p-6 apple-card group relative"
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/10 text-primary font-bold text-lg">
-                          {lead.firstName[0]}{lead.lastName[0]}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-secondary text-lg">{lead.firstName} {lead.lastName}</h3>
-                          <p className="text-sm text-gray-500">{lead.title || 'No Title'}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <button 
-                          onClick={() => { setEditingLead(lead); setIsLeadModalOpen(true); }}
-                          className="p-2 text-gray-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-all"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button 
-                          onClick={async () => {
-                            if (confirm('Delete this lead?')) {
-                              try {
-                                await deleteDoc(doc(db, 'leads', lead.id));
-                              } catch (error) {
-                                handleFirestoreError(error, OperationType.DELETE, `leads/${lead.id}`);
-                              }
-                            }
-                          }}
-                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-3 mb-6">
-                      <div className="flex items-center gap-3 text-sm text-gray-600">
-                        <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50">
-                          <Mail size={14} className="text-gray-400" />
-                        </div>
-                        <span className="truncate font-medium">{lead.email}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-gray-600">
-                        <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-50">
-                          <MapPin size={14} className="text-gray-400" />
-                        </div>
-                        <span className="font-medium">{lead.city || 'Unknown City'}</span>
-                      </div>
-                    </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <div className="min-w-[1200px]">
+                  {/* Sorting Header Row */}
+                  <div className="sticky top-[80px] z-30 grid grid-cols-9 gap-4 px-6 py-4 bg-white border-b border-gray-100 items-start shadow-sm">
+                    <button onClick={() => handleSort('company')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Company <SortIndicator columnKey="company" />
+                    </button>
+                    <button onClick={() => handleSort('firstName')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Contact Name <SortIndicator columnKey="firstName" />
+                    </button>
+                    <button onClick={() => handleSort('title')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Title/Role <SortIndicator columnKey="title" />
+                    </button>
+                    <button onClick={() => handleSort('email')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Email <SortIndicator columnKey="email" />
+                    </button>
+                    <button onClick={() => handleSort('officePhone')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Office Phone <SortIndicator columnKey="officePhone" />
+                    </button>
+                    <button onClick={() => handleSort('city')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      City/Location <SortIndicator columnKey="city" />
+                    </button>
+                    <button onClick={() => handleSort('stage')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Lead Status <SortIndicator columnKey="stage" />
+                    </button>
+                    <button onClick={() => handleSort('createdAt')} className="flex items-center gap-2 text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider hover:text-primary transition-colors group">
+                      Date Added <SortIndicator columnKey="createdAt" />
+                    </button>
+                    <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider text-right">Actions</div>
+                  </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-gray-50">
-                      <div className="flex flex-col gap-1">
-                        <StageBadge stage={lead.stage} />
-                        {lead.lastContactDate && (
-                          <span className="text-[10px] text-gray-400 font-medium">
-                            Last Contact: {format(new Date(lead.lastContactDate), 'MMM d')}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-gray-400 font-medium">
-                        <Calendar size={12} />
-                        {format(new Date(lead.createdAt), 'MMM d, yyyy')}
-                      </div>
+                  <div className="divide-y divide-slate-100 pt-2">
+                    <AnimatePresence mode="popLayout">
+                      {filteredLeads.map((lead) => (
+                        <motion.div
+                          key={lead.id}
+                          layout
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          onClick={() => { setEditingLead(lead); setIsLeadModalOpen(true); }}
+                          className="group bg-white hover:bg-slate-50 border-b border-slate-100 transition-colors cursor-pointer"
+                        >
+                          <div className="grid grid-cols-9 gap-4 px-6 py-6 items-start">
+                            {/* Company Column */}
+                            {renderGridCell('company', 'Company', <span className="text-sm font-semibold text-slate-800">{lead.company || '—'}</span>, lead.company || '', lead)}
+                            
+                            {/* Contact Name Column */}
+                            {renderGridCell('fullName', 'Contact Name', (
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded bg-sky-100 text-sky-600 flex items-center justify-center text-[10px] font-bold uppercase">
+                                  {lead.firstName[0]}{lead.lastName[0]}
+                                </div>
+                                <span className="text-sm text-slate-700 font-medium">{lead.firstName} {lead.lastName}</span>
+                              </div>
+                            ), `${lead.firstName} ${lead.lastName}`, lead)}
+
+                            {/* Title/Role Column */}
+                            {renderGridCell('title', 'Title/Role', <span className="text-sm text-slate-600">{lead.title || '—'}</span>, lead.title || '', lead)}
+
+                            {/* Email Column */}
+                            {renderGridCell('email', 'Email', (
+                              <a 
+                                href={`mailto:${lead.email}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-sm text-sky-500 truncate hover:underline"
+                              >
+                                {lead.email}
+                              </a>
+                            ), lead.email, lead)}
+
+                            {/* Office Phone Column */}
+                            {renderGridCell('officePhone', 'Office Phone', <span className="text-sm text-slate-400">{lead.officePhone || '—'}</span>, lead.officePhone || '', lead)}
+
+                            {/* City/Location Column */}
+                            {renderGridCell('city', 'City/Location', (
+                              <div className="flex items-center gap-1 text-slate-600">
+                                <span className="text-sm">
+                                  {lead.city}{lead.city && lead.state ? ', ' : ''}{lead.state}
+                                  {!lead.city && !lead.state && '—'}
+                                </span>
+                              </div>
+                            ), lead.city || '', lead)}
+
+                            {/* Lead Status Column */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lead Status</span>
+                              <StageBadge stage={lead.stage} />
+                            </div>
+
+                            {/* Date Added Column */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date Added</span>
+                              <span className="text-sm text-slate-500">{format(new Date(lead.createdAt), 'MMM d, yyyy')}</span>
+                            </div>
+
+                            {/* Actions Column */}
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</span>
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setEditingLead(lead); setIsLeadModalOpen(true); }}
+                                  className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                                <button 
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (confirm('Delete this lead?')) {
+                                      try {
+                                        await deleteDoc(doc(db, 'leads', lead.id));
+                                      } catch (error) {
+                                        handleFirestoreError(error, OperationType.DELETE, `leads/${lead.id}`);
+                                      }
+                                    }
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </div>
+                {filteredLeads.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-20 bg-white">
+                    <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4">
+                      <Search size={24} className="text-gray-300" />
                     </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                    <p className="text-gray-500 font-medium">No leads found matching your search</p>
+                    <p className="text-sm text-gray-400 mt-1">Try adjusting your filters or search query</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -505,10 +729,18 @@ function CRMContent() {
                               </p>
                               <ChevronRight size={14} className="text-gray-300 group-hover:text-primary transition-colors" />
                             </div>
-                            <p className="text-[13px] text-gray-500 truncate mb-4">{lead.title || 'No Title'}</p>
+                            <div className="flex flex-col gap-0.5 mb-4">
+                              <p className="text-[13px] text-gray-500 truncate">{lead.title || 'No Title'}</p>
+                              {lead.company && (
+                                <p className="text-[11px] text-primary font-bold uppercase tracking-wider">{lead.company}</p>
+                              )}
+                            </div>
                             
                             <div className="flex items-center justify-between pt-4 border-t border-gray-50">
-                              <span className="text-[12px] text-gray-400 font-semibold">{lead.city || 'Remote'}</span>
+                              <span className="text-[12px] text-gray-400 font-semibold">
+                                {lead.city}{lead.city && lead.state ? ', ' : ''}{lead.state}
+                                {!lead.city && !lead.state && 'Remote'}
+                              </span>
                               <div className="w-7 h-7 rounded-full bg-[#F2F2F7] flex items-center justify-center text-[11px] font-bold text-[#8E8E93]">
                                 {lead.firstName[0]}
                               </div>
@@ -613,6 +845,7 @@ function CRMContent() {
         isOpen={isLeadModalOpen} 
         onClose={() => { setIsLeadModalOpen(false); setEditingLead(null); }}
         title={editingLead ? 'Edit Lead' : 'Add New Lead'}
+        maxWidth="max-w-3xl"
       >
         <LeadForm 
           initialData={editingLead} 
@@ -647,23 +880,32 @@ const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: s
     lastName: initialData?.lastName || '',
     email: initialData?.email || '',
     title: initialData?.title || '',
+    company: initialData?.company || '',
+    officePhone: initialData?.officePhone || '',
     city: initialData?.city || '',
+    state: initialData?.state || '',
     streetAddress: initialData?.streetAddress || '',
     notes: initialData?.notes || '',
     stage: initialData?.stage || 'New Lead' as LeadStage,
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     try {
       if (initialData) {
-        await updateDoc(doc(db, 'leads', initialData.id), {
-          ...formData,
-          lastContactDate: formData.stage !== initialData.stage ? new Date().toISOString() : initialData.lastContactDate
-        });
+        const updateData: any = { ...formData };
+        if (formData.stage !== initialData.stage) {
+          updateData.lastContactDate = new Date().toISOString();
+        } else if (initialData.lastContactDate) {
+          updateData.lastContactDate = initialData.lastContactDate;
+        }
+        
+        await updateDoc(doc(db, 'leads', initialData.id), updateData);
       } else {
         await addDoc(collection(db, 'leads'), {
           ...formData,
@@ -672,8 +914,14 @@ const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: s
         });
       }
       onClose();
-    } catch (error) {
-      handleFirestoreError(error, initialData ? OperationType.UPDATE : OperationType.CREATE, 'leads');
+    } catch (err) {
+      console.error(err);
+      setError('Failed to save lead. Please check your information and try again.');
+      try {
+        handleFirestoreError(err, initialData ? OperationType.UPDATE : OperationType.CREATE, 'leads');
+      } catch (e) {
+        // Error already logged by handleFirestoreError
+      }
     } finally {
       setLoading(false);
     }
@@ -681,6 +929,11 @@ const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: s
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm font-medium">
+          {error}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-6">
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">First Name</label>
@@ -704,30 +957,52 @@ const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: s
         </div>
       </div>
       
-      <div className="space-y-1.5">
-        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Title / Position</label>
-        <input
-          placeholder="VP of Marketing"
-          className="apple-input"
-          value={formData.title}
-          onChange={e => setFormData({ ...formData, title: e.target.value })}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Email Address</label>
-        <input
-          required
-          type="email"
-          placeholder="john@company.com"
-          className="apple-input"
-          value={formData.email}
-          onChange={e => setFormData({ ...formData, email: e.target.value })}
-        />
+      <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Title / Position</label>
+          <input
+            placeholder="VP of Marketing"
+            className="apple-input"
+            value={formData.title}
+            onChange={e => setFormData({ ...formData, title: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Company</label>
+          <input
+            placeholder="Acme Corp"
+            className="apple-input"
+            value={formData.company}
+            onChange={e => setFormData({ ...formData, company: e.target.value })}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
         <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Email Address</label>
+          <input
+            required
+            type="email"
+            placeholder="john@company.com"
+            className="apple-input"
+            value={formData.email}
+            onChange={e => setFormData({ ...formData, email: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Office Phone</label>
+          <input
+            placeholder="(555) 000-0000"
+            className="apple-input"
+            value={formData.officePhone}
+            onChange={e => setFormData({ ...formData, officePhone: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-6">
+        <div className="col-span-2 space-y-1.5">
           <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">City</label>
           <input
             placeholder="San Francisco"
@@ -737,23 +1012,33 @@ const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: s
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Stage</label>
-          <div className="relative">
-            <select
-              className="apple-input appearance-none pr-10"
-              value={formData.stage}
-              onChange={e => setFormData({ ...formData, stage: e.target.value as LeadStage })}
-            >
-              <option value="New Lead">New Lead</option>
-              <option value="First Contact">First Contact</option>
-              <option value="Second Outreach">Second Outreach</option>
-              <option value="Third Outreach">Third Outreach</option>
-              <option value="Follow Up">Follow Up</option>
-              <option value="Closed">Closed</option>
-            </select>
-            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-              <ChevronRight size={16} className="text-gray-400 rotate-90" />
-            </div>
+          <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">State</label>
+          <input
+            placeholder="CA"
+            className="apple-input"
+            value={formData.state}
+            onChange={e => setFormData({ ...formData, state: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Stage</label>
+        <div className="relative">
+          <select
+            className="apple-input appearance-none pr-10"
+            value={formData.stage}
+            onChange={e => setFormData({ ...formData, stage: e.target.value as LeadStage })}
+          >
+            <option value="New Lead">New Lead</option>
+            <option value="First Contact">First Contact</option>
+            <option value="Second Outreach">Second Outreach</option>
+            <option value="Third Outreach">Third Outreach</option>
+            <option value="Follow Up">Follow Up</option>
+            <option value="Closed">Closed</option>
+          </select>
+          <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+            <ChevronRight size={16} className="text-gray-400 rotate-90" />
           </div>
         </div>
       </div>

@@ -8,13 +8,16 @@
         "firstName": { "type": "string", "description": "First name of the lead." },
         "lastName": { "type": "string", "description": "Last name of the lead." },
         "title": { "type": "string", "description": "Job title of the lead." },
+        "company": { "type": "string", "description": "Company name of the lead." },
         "email": { "type": "string", "format": "email", "description": "Email address of the lead." },
+        "officePhone": { "type": "string", "description": "Office phone number of the lead." },
         "city": { "type": "string", "description": "City where the lead is located." },
+        "state": { "type": "string", "description": "State where the lead is located." },
         "streetAddress": { "type": "string", "description": "Street address of the lead." },
         "notes": { "type": "string", "description": "Additional notes about the lead." },
         "stage": { 
           "type": "string", 
-          "enum": ["New", "First Outreach", "Second Outreach", "Follow Up", "Closed"],
+          "enum": ["New Lead", "First Contact", "Second Outreach", "Third Outreach", "Follow Up", "Closed"],
           "description": "Current stage of the lead in the sales process." 
         },
         "uid": { "type": "string", "description": "The user ID of the owner of this lead." },

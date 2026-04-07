@@ -10,8 +10,11 @@ service cloud.firestore {
     //   - firstName: string (required)
     //   - lastName: string (required)
     //   - title: string (optional)
+    //   - company: string (optional)
     //   - email: string (required, email format)
+    //   - officePhone: string (optional)
     //   - city: string (optional)
+    //   - state: string (optional)
     //   - streetAddress: string (optional)
     //   - notes: string (optional)
     //   - stage: string (required, enum)
@@ -59,13 +62,26 @@ service cloud.firestore {
 
     // Domain Validators
     function isValidLead(data) {
-      return hasRequiredFields(['firstName', 'lastName', 'email', 'stage', 'uid', 'createdAt']) &&
+      let allowedFields = ['firstName', 'lastName', 'email', 'stage', 'uid', 'createdAt', 'title', 'company', 'city', 'state', 'streetAddress', 'notes', 'lastContactDate', 'officePhone'];
+      let requiredFields = ['firstName', 'lastName', 'email', 'stage', 'uid', 'createdAt'];
+      let validStages = ['New Lead', 'First Contact', 'Second Outreach', 'Third Outreach', 'Follow Up', 'Closed'];
+      
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
              data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 100 &&
              data.lastName is string && data.lastName.size() > 0 && data.lastName.size() < 100 &&
              isValidEmail(data.email) &&
-             data.stage in ['New', 'First Outreach', 'Second Outreach', 'Follow Up', 'Closed'] &&
+             data.stage in validStages &&
              data.uid == request.auth.uid &&
-             isValidDateString(data.createdAt);
+             isValidDateString(data.createdAt) &&
+             (!('title' in data) || data.title is string) &&
+             (!('company' in data) || data.company is string) &&
+             (!('officePhone' in data) || data.officePhone is string) &&
+             (!('city' in data) || data.city is string) &&
+             (!('state' in data) || data.state is string) &&
+             (!('streetAddress' in data) || data.streetAddress is string) &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('lastContactDate' in data) || isValidDateString(data.lastContactDate));
     }
 
     function isValidTemplate(data) {
