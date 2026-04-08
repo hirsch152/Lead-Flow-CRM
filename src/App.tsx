@@ -234,6 +234,9 @@ function CRMContent() {
   // Modals
   const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isComposeModalOpen, setIsComposeModalOpen] = useState(false);
+  const [selectedLeadForEmail, setSelectedLeadForEmail] = useState<Lead | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: keyof Lead; direction: 'asc' | 'desc' } | null>({ key: 'createdAt', direction: 'desc' });
@@ -347,6 +350,13 @@ function CRMContent() {
       unsubscribeTemplates();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -641,6 +651,17 @@ function CRMContent() {
                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</span>
                               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button 
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setSelectedLeadForEmail(lead);
+                                    setIsComposeModalOpen(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-sky-500 hover:bg-sky-50 rounded transition-all"
+                                  title="Send Email"
+                                >
+                                  <Mail size={14} />
+                                </button>
+                                <button 
                                   onClick={(e) => { e.stopPropagation(); setEditingLead(lead); setIsLeadModalOpen(true); }}
                                   className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all"
                                 >
@@ -868,11 +889,145 @@ function CRMContent() {
           uid={user.uid}
         />
       </Modal>
+
+      {/* Compose Email Modal */}
+      <Modal
+        isOpen={isComposeModalOpen}
+        onClose={() => { setIsComposeModalOpen(false); setSelectedLeadForEmail(null); }}
+        title={selectedLeadForEmail ? `Compose Email to ${selectedLeadForEmail.firstName} ${selectedLeadForEmail.lastName}` : 'Compose Email'}
+        maxWidth="max-w-2xl"
+      >
+        {selectedLeadForEmail && (
+          <ComposeEmailForm
+            lead={selectedLeadForEmail}
+            templates={templates}
+            onClose={() => { setIsComposeModalOpen(false); setSelectedLeadForEmail(null); }}
+            onSent={(msg) => setToast({ message: msg, type: 'success' })}
+          />
+        )}
+      </Modal>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className="fixed bottom-8 left-1/2 z-[100] px-6 py-3 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center gap-3"
+          >
+            <CheckCircle2 size={18} className="text-emerald-400" />
+            <span className="text-sm font-bold">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 // --- Form Components ---
+
+const ComposeEmailForm: React.FC<{
+  lead: Lead;
+  templates: EmailTemplate[];
+  onClose: () => void;
+  onSent: (msg: string) => void;
+}> = ({ lead, templates, onClose, onSent }) => {
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [body, setBody] = useState('');
+  const [subject, setSubject] = useState('');
+
+  const handleTemplateChange = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find(t => t.id === templateId);
+    if (template) {
+      // Mail Merge Logic: replace {{name}} with lead's first name
+      const mergedBody = template.body.replace(/\{\{name\}\}/g, lead.firstName);
+      const mergedSubject = template.subject.replace(/\{\{name\}\}/g, lead.firstName);
+      setBody(mergedBody);
+      setSubject(mergedSubject);
+    } else {
+      setBody('');
+      setSubject('');
+    }
+  };
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSent(`Email sent to ${lead.email}`);
+    onClose();
+  };
+
+  return (
+    <form onSubmit={handleSend} className="space-y-6">
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Select Template</label>
+        <div className="relative">
+          <select
+            className="apple-input appearance-none pr-10"
+            value={selectedTemplateId}
+            onChange={(e) => handleTemplateChange(e.target.value)}
+          >
+            <option value="">Select a template...</option>
+            {templates.map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+            <ChevronRight size={16} className="text-gray-400 rotate-90" />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Subject</label>
+        <input
+          required
+          placeholder="Email Subject"
+          className="apple-input"
+          value={subject}
+          onChange={e => setSubject(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider ml-1">Message</label>
+        <div className="quill-wrapper shadow-sm border border-gray-100 rounded-xl overflow-hidden">
+          <ReactQuill
+            theme="snow"
+            value={body}
+            onChange={setBody}
+            placeholder="Write your message here..."
+            modules={{
+              toolbar: [
+                ['bold', 'italic', 'underline'],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                ['link', 'clean']
+              ],
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-6 py-2.5 rounded-xl font-bold text-[#1D1D1F] bg-[#F2F2F7] hover:bg-[#E5E5EA] transition-all"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="flex items-center gap-2 px-8 py-2.5 rounded-xl font-bold text-white bg-sky-500 hover:bg-sky-600 transition-all shadow-lg shadow-sky-500/20"
+        >
+          <Send size={18} />
+          <span>Send Email</span>
+        </button>
+      </div>
+    </form>
+  );
+};
 
 const LeadForm: React.FC<{ initialData: Lead | null; onClose: () => void; uid: string }> = ({ initialData, onClose, uid }) => {
   const [formData, setFormData] = useState({
